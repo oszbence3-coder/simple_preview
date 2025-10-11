@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="robots" content="nofollow, noindex, noarchive">
+    <meta name="creator" content="https://github.com/sunghwan2789/osu-preview">
+    <title>osu!preview - jmir.xyz</title>
+    <link rel="icon" sizes="any" href="/icon.svg">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <link rel="stylesheet" href="css/style.css">
+
+<body class="h">
+    <div id="container" class="x-viewbox"></div>
+    <button id="play" class="material-icons">&#xE037;</button>
+    <div id="speed">
+        <button value="1.5">DT</button>
+        <button class="e" value="1">-</button>
+        <button value="0.75">HT</button>
+        <button id="hardrock">HR</button>
+    </div>
+    <div id="mania">
+        <button value="1">+</button>
+        <button id="scroll">20</button>
+        <button value="-1">-</button>
+    </div>
+    <div id="control">
+        <input id="progress" type="range" min="0" max="0" value="0">
+        <input id="volume" type="range" min="0" max="100" value="100">
+        <button id="fullscreen" class="material-icons">&#xE5D0;</button>
+    </div>
+    <div id="title">
+        <img src="/_data/BloodCat.svg" width="20" height="30" alt="아까네코 종이모형">
+        <a target="_blank">Loading...</a>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js"></script>
+
+    <script src="js/util.js"></script>
+
+    <script src="js/beatmap/beatmap.js"></script>
+    <script src="js/beatmap/timingpoint.js"></script>
+    <script src="js/beatmap/hitobject.js"></script>
+    <script src="js/beatmap/point.js"></script>
+    <script src="js/beatmap/scroll.js"></script>
+
+    <script src="js/standard/standard.js"></script>
+    <script src="js/standard/hitcircle.js"></script>
+    <script src="js/standard/slider.js"></script>
+    <script src="js/standard/curve/curve.js"></script>
+    <script src="js/standard/curve/equaldistancemulticurve.js"></script>
+    <script src="js/standard/curve/linearbezier.js"></script>
+    <script src="js/standard/curve/catmullcurve.js"></script>
+    <script src="js/standard/curve/curvetype.js"></script>
+    <script src="js/standard/curve/bezier2.js"></script>
+    <script src="js/standard/curve/centripetalcatmullrom.js"></script>
+    <script src="js/standard/curve/circumstancedcircle.js"></script>
+    <script src="js/standard/spinner.js"></script>
+
+    <script src="js/taiko/taiko.js"></script>
+    <script src="js/taiko/donkat.js"></script>
+    <script src="js/taiko/drumroll.js"></script>
+    <script src="js/taiko/shaker.js"></script>
+
+    <script src="js/mania/mania.js"></script>
+    <script src="js/mania/hitnote.js"></script>
+    <script src="js/mania/holdnote.js"></script>
+
+    <script type="text/javascript" src="zip.js/dist/zip.min.js"></script>
+    <script type="text/javascript" src="js-md5/build/md5.min.js"></script>
+    <script src="js/preview.js"></script>
+    <script src="js/viewbox.js"></script>
+
+    <script>
+
+        var preview = new Preview($('#container')[0]);
+        var audio = new Audio();
+
+        $(window).on('hashchange', function () {
+            $(audio).trigger('pause');
+
+            $('#mania').removeClass('e');
+
+            $('#play').removeClass('e');
+
+            var beatmapID = isNaN(location.hash.split('#')[1]) ? 75 : location.hash.split('#')[1];
+            var setID;
+            var osufile_checksum;
+            var audiofilename;
+            var audioblob;
+            var bgfilename;
+            var bgblob;
+            var osufile;
+            !async function () {
+                var self = this;
+                const response = await fetch("https://catboy.best/api/v2/b/" + beatmapID);
+                const data = await response.json();
+                console.log(data);
+                setID = data.beatmapset_id;
+                osufile_checksum = data.checksum;
+                const zipWriter = new zip.ZipWriter(new zip.Data64URIWriter("application/zip"));
+                var mapset_response = await fetch("https://catboy.best/d/" + setID);
+
+                                if (mapset_response.status >= 400 && mapset_response.status < 600) {
+                    $('#title a').text("beatmap not found on mirror, sorry");
+                    return;
+                }
+                var blob = await mapset_response.blob();
+                console.log("osu zip file: " + URL.createObjectURL(blob));
+                const reader = new zip.ZipReader(new zip.BlobReader(blob));
+                // get all entries from the zip
+                const entries = await reader.getEntries();
+                if (entries.length) {
+                    console.log(entries);
+                    // get bg filename
+                    for (entry in entries.sort((a, b) => a.filename.endsWith(".osu") ? -1 : 1)) {
+                        let text = await entries[entry].getData(
+                            // writer
+                            new zip.TextWriter()
+                        );
+                        let md5sum = md5(text);
+                        if (md5sum === osufile_checksum) {
+                            osufile = text;
+                            console.log(text);
+                            let bgmatch = text.match(/(?<=0,0,").+(?=")/);
+                            if (bgmatch) {
+                                bgfilename = bgmatch[0];
+                                console.log(bgfilename);
+                            }
+                            let audiomatch = text.match(/(?<=AudioFilename: ).+(?=)/);
+                            if (audiomatch) {
+                                audiofilename = audiomatch[0];
+                                console.log(audiofilename);
+                            }
+                            break;
+                        }
+                    }
+                    //make bg blob
+                    if (bgfilename) {
+                        let bgfound = false;
+                        for (entry in entries) {
+                            if (entries[entry].filename === bgfilename) {
+                                bgfound = true;
+                                let extension = bgfilename.split(".").pop();
+                                let bgblob2 = await entries[entry].getData(
+                                    // writer
+                                    new zip.BlobWriter("image/" + extension)
+                                );
+                                bgblob = URL.createObjectURL(bgblob2);
+                                console.log(bgblob);
+                            }
+                        }
+                        if (!bgfound) {
+                            for (entry in entries) {
+                                if (entries[entry].filename.replace(/[^\x00-\x7F]/g, "").toLowerCase() === bgfilename.replace(/[^\x00-\x7F]/g, "").toLowerCase()) {
+                                    bgfound = true;
+                                    let extension = bgfilename.split(".").pop();
+                                    let bgblob2 = await entries[entry].getData(
+                                        // writer
+                                        new zip.BlobWriter("audio/" + extension)
+                                    );
+                                    bgblob = URL.createObjectURL(bgblob2);
+                                    console.log(bgblob);
+                                }
+                            }
+                        }
+                    }
+                    //make audio blob
+                    if (audiofilename) {
+                        let audiofound = false;
+                        for (entry in entries) {
+                            if (entries[entry].filename === audiofilename) {
+                                audiofound = true;
+                                let extension = audiofilename.split(".").pop();
+                                let audioblob2 = await entries[entry].getData(
+                                    // writer
+                                    new zip.BlobWriter("audio/" + extension)
+                                );
+                                audioblob = URL.createObjectURL(audioblob2);
+                                console.log(audioblob);
+                            }
+                        }
+                        if (!audiofound) {
+                            for (entry in entries) {
+                                if (entries[entry].filename.replace(/[^\x00-\x7F]/g, "").toLowerCase() === audiofilename.replace(/[^\x00-\x7F]/g, "").toLowerCase()) {
+                                audiofound = true;
+                                let extension = audiofilename.split(".").pop();
+                                let audioblob2 = await entries[entry].getData(
+                                    // writer
+                                    new zip.BlobWriter("audio/" + extension)
+                                );
+                                audioblob = URL.createObjectURL(audioblob2);
+                                console.log("audio: " + audioblob);
+                            }
+                            }
+                        }
+                    }
+                }
+                // close the ZipReader
+                await reader.close();
+
+                if(bgblob && osufile) {
+                    preview.load(bgblob, osufile, entries, function () {
+                        audio.src = audioblob;
+                        $('#title a').prop('href', '//osu.ppy.sh/b/' + beatmapID)
+                            .text(this.beatmap.toString());
+                        if (self.beatmap instanceof Mania) {
+                            $('#mania').addClass('e');
+                            $('#scroll').text(self.beatmap.scrollSpeed);
+                        }
+                        $('#play').addClass('e');
+                    }, function (e) {
+                        alert(e);
+                        console.log(e);
+                    });
+                } else $('#title a').text("an error has occurred, sorry!");
+
+
+            }();
+        }).trigger('hashchange');
+
+        $(document.body).on('mousemove', function () {
+            var self = $(this);
+            clearTimeout(self.data('h'));
+            self.addClass('h').data('h', setTimeout(function () {
+                if (!audio.paused) {
+                    self.removeClass('h');
+                }
+            }, 3000));
+        });
+
+        $(audio).on('pause', function (e) {
+            $(document.body).trigger('mousemove');
+            $('#play').addClass('e');
+        }).on('play', function (e) {
+            preview.beatmap.refresh();
+            if (e.isTrigger) {
+                e.preventDefault();
+                preview.at(audio.currentTime * 1000);
+            }
+            else {
+                $('#play').removeClass('e');
+                requestAnimationFrame(function foo() {
+                    preview.at(audio.currentTime * 1000);
+                    if (!audio.paused) {
+                        requestAnimationFrame(foo);
+                    }
+                });
+            }
+        }).on('durationchange', function () {
+            $('#progress').val(0).prop('max', this.duration);
+            $('#volume').trigger('change');
+            $('#speed .e').trigger('click');
+        }).on('timeupdate', function () {
+            $('#progress').val(this.currentTime);
+        });
+
+        $('#progress').on('change', function () {
+            audio.currentTime = this.value;
+            $(audio).trigger('play');
+        });
+
+        $('#volume').on('change', function () {
+            audio.volume = this.value / 100;
+        });
+
+        $('#speed button:not(#hardrock)').on('click', function () {
+            $('#speed .e:not(#hardrock)').removeClass('e');
+            audio.playbackRate = $(this).addClass('e').val();
+        });
+
+        $('#mania button').on('click', function () {
+            var val = this.value | 0;
+            if (val) {
+                preview.beatmap.scrollSpeed += val;
+                $('#scroll').text(preview.beatmap.scrollSpeed);
+                $(audio).trigger('play');
+            }
+        });
+
+        $('#hardrock').on('click', function () {
+            if (preview.beatmap.HardRock) {
+                preview.beatmap.HardRock = false
+                $('#hardrock').removeClass('e');
+                $('canvas').css('transform-origin: center; transform: rotate(0deg);');
+            } else {
+                preview.beatmap.HardRock = true
+                $('#hardrock').addClass('e');
+                $('canvas').css('transform-origin: center; transform: rotate(180deg);');
+            }
+        });
+
+        $('#play').on('click', function (e) {
+            e.preventDefault();
+            if ($(this).hasClass('e')) {
+                audio.play();
+            }
+            else {
+                audio.pause();
+            }
+        });
+
+        $('#fullscreen').on('click', function (e) {
+            e.preventDefault();
+            var doc = window.document;
+            var docEl = doc.documentElement;
+
+            var requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+            var cancelFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
+
+            if (!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
+                requestFullScreen.call(docEl);
+            }
+            else {
+                cancelFullScreen.call(doc);
+            }
+        });
+
+    </script>
+
+</html>
